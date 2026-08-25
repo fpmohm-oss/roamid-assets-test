@@ -1,0 +1,162 @@
+name: Test Kansai R2 E2E
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/test-kansai-r2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  R2_BUCKET: roamid-card-assets
+  R2_KEY: kansai/journeys/v1/KNS-5-231.webp
+  R2_PUBLIC_URL: https://pub-f14e9daf444445d1a040f8fbe29a60bc.r2.dev/kansai/journeys/v1/KNS-5-231.webp
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install image dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          python -m pip install pillow
+
+      - name: Generate KNS-5-231 test asset
+        shell: bash
+        run: |
+          mkdir -p kansai/journeys/v1
+          python - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          from pathlib import Path
+
+          W,H=1080,5155
+          M=72
+          bg=(10,15,27); panel=(23,31,49); text=(238,234,224); muted=(164,169,180)
+          gold=(196,157,87); purple=(112,83,160); line=(49,58,76)
+          serif_b='/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc'
+          sans_r='/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+          sans_b='/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
+          F={
+            'eyebrow':ImageFont.truetype(sans_b,26),
+            'price':ImageFont.truetype(serif_b,76),
+            'title':ImageFont.truetype(serif_b,58),
+            'subtitle':ImageFont.truetype(sans_r,29),
+            'day':ImageFont.truetype(serif_b,40),
+            'route':ImageFont.truetype(sans_b,27),
+            'body':ImageFont.truetype(sans_r,30),
+            'small':ImageFont.truetype(sans_r,24),
+          }
+
+          days=[
+            ('Day 1','台灣 → 關西','中午抵達後前往京都，入住與晚餐。第一晚先從住宿周邊街區感受地方感。抵達日可安排一個順路夜間元素，但不跨區追行程。'),
+            ('Day 2','京都','巷弄與河岸散步 → 大原 → 伏見酒藏街區。地方感、自然與第二層發現優先。一般日與特色日交錯，讓高潮有對比。'),
+            ('Day 3','京都','大原 → 伏見酒藏街區 → 京都山側步道。地方感、自然與第二層發現優先。一般日與特色日交錯，讓高潮有對比。'),
+            ('Day 4','京都 → 姬路','姬路｜好古園周邊 → 地方街區 → 書寫山圓教寺。地方感、自然與第二層發現優先。一般日與特色日交錯，讓高潮有對比。'),
+            ('Day 5','姬路 → 關西機場 → 台灣','中午離境；上午只保留早餐與順路散步，不放不可延誤 Hero。'),
+          ]
+
+          def wrap(draw,s,font,maxw):
+            lines=[]; cur=''
+            for ch in s:
+              if draw.textlength(cur+ch,font=font)<=maxw:
+                cur+=ch
+              else:
+                if cur: lines.append(cur)
+                cur=ch
+            if cur: lines.append(cur)
+            return lines
+
+          def draw_wrapped(draw,x,y,s,font,fill,maxw,leading=1.45):
+            lines=wrap(draw,s,font,maxw)
+            lh=int((font.getbbox('國Ag')[3]-font.getbbox('國Ag')[1])*leading)
+            for ln in lines:
+              draw.text((x,y),ln,font=font,fill=fill); y+=lh
+            return len(lines)*lh
+
+          def scene(draw,x0,y0,x1,y1,i,route):
+            draw.rounded_rectangle((x0,y0,x1,y1),radius=28,fill=panel)
+            draw.rectangle((x0,y0,x1,y0+220),fill=(30,39,57))
+            draw.ellipse((x1-155,y0+58,x1-87,y0+126),fill=gold)
+            draw.polygon([(x0,y0+245),(x0+190,y0+120),(x0+360,y0+245),(x0+540,y0+150),(x0+720,y0+245),(x1,y0+245)],fill=(39,48,65))
+            draw.rectangle((x0,y0+280,x1,y1),fill=(16,25,38))
+            draw.polygon([(x0+430,y1),(x0+535,y0+275),(x0+610,y0+275),(x0+730,y1)],fill=(38,45,61))
+            if '京都' in route:
+              tx=x0+105; ty=y0+230
+              draw.rectangle((tx,ty,tx+18,ty+105),fill=gold); draw.rectangle((tx+90,ty,tx+108,ty+105),fill=gold)
+              draw.rectangle((tx-20,ty,tx+128,ty+16),fill=gold); draw.rectangle((tx-6,ty+26,tx+114,ty+38),fill=gold)
+            if '姬路' in route:
+              cx=x1-300; cy=y0+245
+              draw.rectangle((cx-58,cy-46,cx+58,cy+58),fill=(224,222,214))
+              draw.polygon([(cx-90,cy-46),(cx,cy-105),(cx+90,cy-46)],fill=(70,77,90))
+            draw.rounded_rectangle((x0+22,y1-64,x0+310,y1-18),radius=18,fill=bg)
+            draw.text((x0+40,y1-58),f'DAY {i:02d}  {route}',font=F['small'],fill=text)
+
+          img=Image.new('RGB',(W,H),bg); d=ImageDraw.Draw(img); y=72
+          d.text((M,y),'ROAMID / KANSAI REFERENCE',font=F['eyebrow'],fill=gold); y+=62
+          d.text((M,y),'NT$ 46,800',font=F['price'],fill=text); y+=105
+          d.text((M,y),'關西第二層',font=F['title'],fill=text); y+=82
+          d.text((M,y),'5天｜平衡｜充實｜秘境',font=F['subtitle'],fill=muted); y+=70
+          d.line((M,y,W-M,y),fill=gold,width=2); y+=46
+          y+=draw_wrapped(d,M,y,'參考價，依實際出發日、住宿與供應條件調整',F['small'],muted,W-2*M)+60
+
+          for i,(label,route,desc) in enumerate(days,1):
+            d.text((M,y),label,font=F['day'],fill=text); y+=58
+            d.text((M,y),route,font=F['route'],fill=gold); y+=55
+            scene(d,M,y,W-M,y+390,i,route); y+=430
+            d.rounded_rectangle((M,y,W-M,y+20),radius=10,fill=purple); y+=42
+            y+=draw_wrapped(d,M+24,y,desc,F['body'],text,W-2*M-48)+78
+            d.line((M,y,W-M,y),fill=line,width=2); y+=56
+
+          d.text((M,y),'WHY THIS MATCHES',font=F['eyebrow'],fill=gold); y+=56
+          y+=draw_wrapped(d,M,y,'5日決定旅程尺度；平衡決定資源配置；充實決定密度與轉場；秘境決定主價值。',F['body'],text,W-2*M)+70
+          d.line((M,y,W-M,y),fill=gold,width=2); y+=45
+          y+=draw_wrapped(d,M,y,'Reference Page 用參考行程，不等同正式報價或最終出團版本。',F['small'],muted,W-2*M)+40
+          d.text((M,y),'KNS-5-231',font=F['small'],fill=gold); y+=80
+          img=img.crop((0,0,W,min(H,y)))
+          out=Path('kansai/journeys/v1/KNS-5-231.webp')
+          img.save(out,'WEBP',quality=88,method=6)
+          print(out, img.size, out.stat().st_size)
+          PY
+
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp kansai/journeys/v1/KNS-5-231.webp "s3://$R2_BUCKET/$R2_KEY" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type image/webp \
+            --cache-control "public, max-age=3600" \
+            --no-progress
+
+      - name: Verify object metadata
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3api head-object \
+            --bucket "$R2_BUCKET" \
+            --key "$R2_KEY" \
+            --endpoint-url "$R2_ENDPOINT"
+
+      - name: Verify public URL
+        run: |
+          for i in 1 2 3 4 5 6; do
+            CODE=$(curl -L -s -o /tmp/r2.webp -w '%{http_code}' "$R2_PUBLIC_URL")
+            echo "Attempt $i: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              file /tmp/r2.webp
+              test -s /tmp/r2.webp
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
