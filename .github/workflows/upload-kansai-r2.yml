@@ -1,0 +1,97 @@
+name: Upload Kansai assets to R2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "kansai/journeys/v1/**/*.webp"
+      - "kansai/journeys/v1/*.webp"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kansai-r2-upload
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: roamid-card-assets
+  R2_PREFIX: kansai/journeys/v1
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure AWS CLI
+        shell: bash
+        run: |
+          if ! command -v aws >/dev/null 2>&1; then
+            python -m pip install --upgrade awscli
+          fi
+          aws --version
+
+      - name: Validate asset set
+        id: assets
+        shell: bash
+        run: |
+          if [ ! -d "$R2_PREFIX" ]; then
+            echo "Asset directory not found: $R2_PREFIX"
+            exit 1
+          fi
+
+          COUNT=$(find "$R2_PREFIX" -type f -name 'KNS-*.webp' | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Found $COUNT Kansai WEBP assets"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No KNS-*.webp assets found. Nothing to upload."
+            exit 1
+          fi
+
+      - name: Upload WEBP assets to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        shell: bash
+        run: |
+          aws s3 cp "$R2_PREFIX/" "s3://$R2_BUCKET/$R2_PREFIX/" \
+            --recursive \
+            --exclude "*" \
+            --include "KNS-*.webp" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type "image/webp" \
+            --cache-control "public, max-age=3600" \
+            --no-progress
+
+      - name: Verify uploaded object count
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        shell: bash
+        run: |
+          LOCAL_COUNT="${{ steps.assets.outputs.count }}"
+          REMOTE_COUNT=$(aws s3 ls "s3://$R2_BUCKET/$R2_PREFIX/" \
+            --recursive \
+            --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' \
+            | grep -E '(^|/)KNS-[^/]+\.webp$' \
+            | wc -l \
+            | tr -d ' ')
+
+          echo "Local assets:  $LOCAL_COUNT"
+          echo "Remote assets: $REMOTE_COUNT"
+
+          if [ "$REMOTE_COUNT" -lt "$LOCAL_COUNT" ]; then
+            echo "R2 verification failed: remote object count is lower than local asset count."
+            exit 1
+          fi
+
+          echo "R2 upload verification PASS"
